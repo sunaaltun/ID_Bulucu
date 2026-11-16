@@ -42,20 +42,20 @@ def twitter(u, tok):
 
 
 def instagram(u, _):
-    r = S.get("https://i.instagram.com/api/v1/users/web_profile_info/",
-              params={"username": u},
-              headers={"x-ig-app-id": "936619743392459",
-                       "User-Agent": "Instagram 219.0.0.12.117 Android"}, timeout=T)
-    if r.status_code == 404:
-        raise LookupError("Kullanıcı bulunamadı.")
-    if r.ok:
-        try:
+    try:
+        r = S.get("https://i.instagram.com/api/v1/users/web_profile_info/",
+                  params={"username": u},
+                  headers={"x-ig-app-id": "936619743392459",
+                           "User-Agent": "Instagram 219.0.0.12.117 Android"}, timeout=T)
+        if r.status_code == 404:
+            raise LookupError("Kullanıcı bulunamadı.")
+        if r.ok:
             us = r.json()["data"]["user"]
             return dict(id=us["id"], name=us.get("full_name"),
                         extra={"Takipçi": us.get("edge_followed_by", {}).get("count"),
                                "Gizli hesap": "Evet" if us.get("is_private") else "Hayır"})
-        except (KeyError, TypeError, ValueError):
-            pass
+    except (requests.RequestException, KeyError, TypeError, ValueError):
+        pass  # i.instagram.com erişilemedi veya beklenmedik yanıt: www ile devam et
     t = S.get(f"https://www.instagram.com/{u}/", timeout=T).text
     m = re.search(r'"profilePage_(\d+)"', t) or re.search(r'"user_id":"(\d+)"', t)
     if m:
@@ -109,8 +109,15 @@ def lookup():
         return jsonify(ok=True, platform=p, username=u, **FN[p](u, b.get("token")))
     except LookupError as e:
         return jsonify(ok=False, platform=p, username=u, error=str(e))
-    except requests.RequestException:
-        return jsonify(ok=False, platform=p, username=u, error="Bağlantı hatası. İnternetinizi kontrol edin.")
+    except requests.RequestException as e:
+        kind = type(e).__name__
+        hint = {"SSLError": "SSL/sertifika sorunu (antivirüs veya VPN olabilir).",
+                "ProxyError": "Proxy ayarı sorunu.",
+                "ConnectTimeout": "Zaman aşımı: site bu ağdan erişilemiyor olabilir.",
+                "ReadTimeout": "Zaman aşımı: site yanıt vermedi.",
+                "ConnectionError": "Siteye bağlanılamadı (DNS, güvenlik duvarı veya erişim engeli)."}.get(kind, "")
+        return jsonify(ok=False, platform=p, username=u,
+                       error=f"Bağlantı hatası [{kind}]. {hint} Ayrıntı: {str(e)[:160]}")
 
 
 @app.get("/")
